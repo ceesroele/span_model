@@ -1,0 +1,9 @@
+/cache_dir/
+/runs/
+/ptc_2020/
+/memes_2021/
+span/__pycache__/
+start_conda.sh
+training_set_task2.txt
+dev_set_task2.txt
+test_set_task2.txt
