@@ -16,6 +16,7 @@ from simpletransformers.seq2seq import Seq2SeqModel, Seq2SeqArgs
 import logging
 import sys
 from pprint import pprint
+import pandas as pd
 
 from .span_utils import (
     get_tokens_from_labels,
@@ -23,7 +24,8 @@ from .span_utils import (
     decode,
     calibrate,
     split_in_sentences,
-    merge_short_sentences
+    merge_short_sentences,
+    FLC_score
 )
 
 # Use this logger in all modules
@@ -130,14 +132,40 @@ class SpanModel(Seq2SeqModel):
                             args=args, eval_data=eval_data_df, verbose=verbose, **kwargs)
 
 
-    def eval_model(self, eval_data, output_dir=None, verbose=True, silent=False, **kwargs):
-        eval_data_df = span_data_to_dataframe(eval_data, self.labels)
-        return super().eval_model(eval_data_df, output_dir=output_dir, verbose=verbose,
-                                  silent=silent, **kwargs)
+    def eval_model(self, eval_data, output_dir=None, verbose=True, report='original', analyse=False, silent=False, **kwargs):
+        """
 
+        :param eval_data:
+        :param output_dir:
+        :param verbose:
+        :param report: ['original', 'flc'] Set to original to pass value from Simple Transformers, set to 'flc' to get
+                       dictionary with Fragment Level Classification F1 report.
+        :param silent:
+        :param kwargs:
+        :return:
+        """
+        eval_data_df = span_data_to_dataframe(eval_data, self.labels)
+        if report == 'original':
+            return super().eval_model(eval_data_df, output_dir=output_dir, verbose=verbose,
+                                silent=silent, **kwargs)
+        elif report == 'flc':
+            predictions = self.predict([d['article'] for d in eval_data])
+            if analyse:
+                lst = []
+                for raw_prediction, post_processed_prediction in zip(self._raw_predictions, predictions):
+                    lst.append((raw_prediction, post_processed_prediction))
+                predictions_df = pd.DataFrame(lst, columns=['raw_prediction', 'processed_prediction'])
+                analyse_df = pd.concat([eval_data_df, predictions_df], axis=1)
+                analyse_df.to_csv('analyse.txt')
+
+            res_for_screen, res_for_script = FLC_score(predictions, eval_data, self.labels)
+            return res_for_script
+        else:
+            raise ValueError(f'Invalid argument report="{report}"')
 
     def predict(self, to_predict):
         predictions = super().predict(to_predict)
+        self._raw_predictions = predictions
         if self.split_in_sentences:
             preds = self._interpret_outcome_split_in_sentences(to_predict)
         else:

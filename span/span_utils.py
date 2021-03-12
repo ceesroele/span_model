@@ -27,6 +27,14 @@ logger.addHandler(ch)
 logger.setLevel(logging.INFO)
 
 
+ERRORS = {
+    'cwo': 'Closure without opening',
+    'fpd': 'False Positive Double',  # Both opening and closing tags present
+    'fpco': 'False Negative Closing only',  # Closing tag that is false positive
+    'fpoo': 'False Positive Opening only',  # Opening tag that is false positive
+    'fn': 'False Negative',  # Tag missing
+}
+
 @dataclass
 class Fragment:
     """Object identifying a fragment by the begin and end of its span and its label"""
@@ -94,10 +102,7 @@ class Fragment:
 
 
 def count_fragments(data: list) -> int:
-    n = 0
-    for d in data:
-        n += len(d['fragments'])
-    return n
+    return sum([len(f) for d in data for f in d['fragments']])
 
 
 def label_to_symbol(label: str, all_labels: list) -> str:
@@ -110,10 +115,10 @@ def label_to_symbol(label: str, all_labels: list) -> str:
 
 def symbol_to_label(symbol: str, all_labels: list) -> str:
     """Convert a label to a special symbol to use as input or output for encoder/decoder"""
-    m = re.search("[i-(\d+)]", symbol)
-    n = re.search("[o-(\d+)]", symbol)
+    m = re.search(r'[i-(\d+)]', symbol)
+    n = re.search(r'[o-(\d+)]', symbol)
     if m is None and n is None:
-        raise ValueError(f"Symbol {symbol} fails to match symbol regex")
+        raise ValueError(f'Symbol {symbol} fails to match symbol regex')
     elif m is not None:
         return all_labels[m.group(1)]
     else:
@@ -240,8 +245,8 @@ def decode(s: str, all_labels: list) -> tuple:
     """Convert a string with Begin and End markers into an article and a list of fragments."""
     article = []  # article is built up character by character
     label_dict = {label_index: None for label_index in range(len(all_labels))}
-    re_start = "^\[i-(\d+)\]\s?"
-    re_end = "^\s?\[o-(\d+)\]"
+    re_start = r'^\[i-(\d+)\]\s?'
+    re_end = r'^\s?\[o-(\d+)\]'
     index = 0
     fragments = []
     errors = 0  # number of errors during processing
@@ -339,6 +344,7 @@ def split_sentences_multi(id: str, article: str, fragments: list, include_empty=
     #print('original fragments', fragment_texts, fragments)
     if fragments == []:
         # Just ignore this
+        # FIXME: not correct, these should be added too if 'include_empty' is True
         print(f"Ignoring article with length {len(article)} for empty fragments")
         # return data
     else:
@@ -542,7 +548,7 @@ def surrounding_word(s: str, index: int, with_line_end=False):
     :param with_line_end If set, a trailing line end character will be included with the word
 
     Returns: (start, end) of word identified by 'index' or None if index is not a position in a word."""
-    is_word = re.compile('\w')
+    is_word = re.compile(r'\w')
     #print(f' s=[{s}], index={index}')
     if index >= len(s):
         index = len(s) - 1
@@ -565,68 +571,73 @@ def calibrate(fragment: Fragment, match_text: str, orig_text:str, distance=3) ->
     """Calibrates a fragment to another text, assuming it to be nearly right.
 
     Effectively, it moves a fragment a short distance to better match the original text"""
-    fragment_text = fragment.extract(match_text).lower()
+    try:
+        fragment_text = fragment.extract(match_text).lower()
 
-    #print(f'INPUT FRAGMENT = [{fragment_text}]')
+        #print(f'INPUT FRAGMENT = [{fragment_text}]')
 
-    first_word_re = re.compile('\A\W*(\w+)\W.*', re.MULTILINE | re.DOTALL)
-    # Include trailing end of line interpunction
-    last_word_re = re.compile('.*\W(\w+[!.?]?)\W*\Z', re.MULTILINE | re.DOTALL)
+        first_word_re = re.compile(r'\A\W*(\w+)\W.*', re.MULTILINE | re.DOTALL)
+        # Include trailing end of line interpunction
+        last_word_re = re.compile(r'.*\W(\w+[!.?]?)\W*\Z', re.MULTILINE | re.DOTALL)
 
-    m = first_word_re.match(fragment_text+' ')
-    assert m is not None, f"First word matching failed for [{fragment_text} ] for {fragment}"
-    first_word = m.group(1)
-
-    # Deal with aberrant single letter words, skip them unless they are 'i' or 'a'
-    # Commented out: this had a negative effect
-    if len(first_word) == 1 and first_word not in ['i', 'a']:
-        fragment.start += 1
-        fragment_text = fragment_text[1:]
         m = first_word_re.match(fragment_text+' ')
-        assert m is not None, f"First word matching failed (b) for [{fragment_text} ] for {fragment}"
+        assert m is not None, f"First word matching failed for [{fragment_text} ] for {fragment}"
         first_word = m.group(1)
 
-    n = last_word_re.match(' ' + fragment_text)
-    assert n is not None, f"Last word matching failed for [ {fragment_text}] for {fragment}"
-    last_word = n.group(1)
+        # Deal with aberrant single letter words, skip them unless they are 'i' or 'a'
+        # Commented out: this had a negative effect
+        if len(first_word) == 1 and first_word not in ['i', 'a']:
+            fragment.start += 1
+            fragment_text = fragment_text[1:]
+            m = first_word_re.match(fragment_text+' ')
+            assert m is not None, f"First word matching failed (b) for [{fragment_text} ] for {fragment}"
+            first_word = m.group(1)
 
-    have_set_first_word = False
-    have_set_last_word = False
+        n = last_word_re.match(' ' + fragment_text)
+        assert n is not None, f"Last word matching failed for [ {fragment_text}] for {fragment}"
+        last_word = n.group(1)
 
-    start, end = fragment.start, fragment.end
-    startpos = max(start - distance, 0)
-    for i in range(startpos, start + distance):
-        if orig_text[i:].lower().startswith(first_word):
-            start = i
-            have_set_first_word = True
-            break
+        have_set_first_word = False
+        have_set_last_word = False
 
-    endpos = min(end + distance, len(orig_text))
-    for i in range(end - distance, endpos):
-        if orig_text[:i].lower().endswith(last_word):
-            end = i
-            have_set_last_word = True
-            break
+        start, end = fragment.start, fragment.end
+        startpos = max(start - distance, 0)
+        for i in range(startpos, start + distance):
+            if orig_text[i:].lower().startswith(first_word):
+                start = i
+                have_set_first_word = True
+                break
 
-    if not have_set_first_word:
-        res = surrounding_word(orig_text, start)
-        if res is None:
-            print("starting in empty space")
-        else:
-            start = res[0]
-    if not have_set_last_word:
-        res = surrounding_word(orig_text, end, with_line_end=True)
-        if res is None:
-            print("ending in empty space")
-        else:
-            end = res[1]
+        endpos = min(end + distance, len(orig_text))
+        for i in range(end - distance, endpos):
+            if orig_text[:i].lower().endswith(last_word):
+                end = i
+                have_set_last_word = True
+                break
 
-    fragment.start = start
-    fragment.end = end
+        if not have_set_first_word:
+            res = surrounding_word(orig_text, start)
+            if res is None:
+                print("starting in empty space")
+            else:
+                start = res[0]
+        if not have_set_last_word:
+            res = surrounding_word(orig_text, end, with_line_end=True)
+            if res is None:
+                print("ending in empty space")
+            else:
+                end = res[1]
 
-    # print(f'OUTPUT FRAGMENT = [{fragment.extract(orig_text)}]')
+        fragment.start = start
+        fragment.end = end
 
-    return fragment
+        # print(f'OUTPUT FRAGMENT = [{fragment.extract(orig_text)}]')
+
+        return fragment
+    except AssertionError as e:
+        print(e)
+        print(f'Failed to calibrate: returning original fragment {fragment}')
+        return fragment
 
 
 def fragment_train_test_split(data: list, labels: list, test_size=0.2, shuffle=True):
@@ -677,6 +688,143 @@ def fragment_train_test_split(data: list, labels: list, test_size=0.2, shuffle=T
         test.append(data[key])
 
     return train, test
+
+
+########## Score ##########################################
+
+
+def compute_prec_rec_f1(prec_numerator, prec_denominator, rec_numerator, rec_denominator, print_results=False):
+    logger.debug("P=%f/%d, R=%f/%d"%(prec_numerator, prec_denominator, rec_numerator, rec_denominator))
+    p = r = f1 = 0
+    if prec_denominator > 0:
+        p = prec_numerator / prec_denominator
+    if rec_denominator > 0:
+        r = rec_numerator / rec_denominator
+    if print_results:
+        logger.debug("Precision=%f/%d=%f\tRecall=%f/%d=%f" % (
+            prec_numerator, prec_denominator, p, rec_numerator, rec_denominator, r))
+    if prec_denominator == 0 and rec_denominator == 0:
+        f1 = 1.0
+    if p > 0 and r > 0:
+        f1 = 2 * (p * r / (p + r))
+    if print_results:
+        logger.info("F1=%f" % (f1))
+    return p, r, f1
+
+
+def calc_c(s, t, h):
+    """
+    :param s: Fragment prediction
+    :param t: Fragment ground truth
+    :param h: Normalizing factor
+    :return:
+    """
+    intersection = s & t
+    if intersection is None or s.label != t.label:
+        return 0
+    else:
+        return len(intersection) / h
+
+
+def count_fragments(data, label=None):
+    if label is None:
+        return len([f for d in data for f in d['fragments']])
+    else:
+        count = 0
+        for d in data:
+            count += len([f for f in d['fragments'] if f.label == label])
+        return count
+
+
+def compute_FLC_score(predictions, ground_truths, labels, per_article_evaluation=False):
+    total_fragments_prediction = 0
+    total_fragments_ground = 0
+
+    cumulative_label_precision = {lab: 0 for lab in labels}
+    cumulative_label_recall = {lab: 0 for lab in labels}
+
+    cumulative_precision = 0
+    cumulative_recall = 0
+
+    f1_articles = []
+
+    for pred, ground in zip(predictions, ground_truths):
+        count_article_fragments_prediction = len(pred['fragments'])
+        count_article_fragments_ground = len(ground['fragments'])
+
+        total_fragments_prediction += count_article_fragments_prediction
+        total_fragments_ground += count_article_fragments_ground
+
+        article_cumulative_precision = 0
+        article_cumulative_recall = 0
+        for s_fragment in pred['fragments']:
+            for t_fragment in ground['fragments']:
+                precision = calc_c(s_fragment, t_fragment, len(s_fragment))
+                recall = calc_c(s_fragment, t_fragment, len(t_fragment))
+
+                article_cumulative_precision += precision
+                article_cumulative_recall += recall
+
+                if s_fragment.label == t_fragment.label:
+                    # if there is no overlap, e.g. because there are several spans with the label, p and r will be 0
+                    cumulative_label_precision[s_fragment.label] += precision
+                    cumulative_label_recall[s_fragment.label] += recall
+
+        cumulative_precision += article_cumulative_precision
+        cumulative_recall += article_cumulative_recall
+
+        p_article, r_article, f1_article = compute_prec_rec_f1(
+            article_cumulative_precision,
+            count_article_fragments_prediction,
+            article_cumulative_recall,
+            count_article_fragments_ground,
+            print_results=False)
+
+        f1_articles.append(f1_article)
+
+    p, r, f1 = compute_prec_rec_f1(
+        cumulative_precision, total_fragments_prediction,
+        cumulative_recall, total_fragments_ground
+    )
+
+    if per_article_evaluation:
+        logger.info("Per article evaluation F1=%s" % (",".join([str(f1_value) for f1_value in f1_articles])))
+
+    f1_per_technique = []
+    for label in labels:
+        precision_for_label, recall_for_label, f1_for_label = compute_prec_rec_f1(
+            cumulative_label_precision[label],
+            count_fragments(predictions, label=label),
+            cumulative_label_recall[label],
+            count_fragments(ground_truths, label=label),
+            False)
+        f1_per_technique.append(f1_for_label)
+        logger.debug("%s: P=%f R=%f F1=%f" % (label, precision_for_label, recall_for_label, f1_for_label))
+
+    return p, r, f1, f1_per_technique
+
+
+def FLC_score(predictions: list, ground_truths: list, labels: list):
+    """Fragment Level Classification score of prediction compared to ground_truth.
+
+    See: See: https://propaganda.qcri.org/semeval2020-task11/data/propaganda_tasks_evaluation.pdf
+
+    Args:
+        predictions: list of Fragments
+        ground_truths: list of Fragments
+        labels: list of labels for classes
+    """
+    precision, recall, f1, f1_per_label = compute_FLC_score(predictions, ground_truths, labels, per_article_evaluation=False)
+    res_for_screen = "\nF1=%f\nPrecision=%f\nRecall=%f\n%s\n" % (
+        f1,
+        precision,
+        recall,
+        "\n".join(["F1_" + pr + "=" + str(f) for pr, f in zip(labels, f1_per_label)])
+    )
+    f1_for_labels = {labels[i]: f1_per_label[i] for i in range(len(labels))}
+    res_for_script = {'f1': f1, 'precision': precision, 'recall': recall, 'f1_for_labels': f1_for_labels}
+
+    return res_for_screen, res_for_script
 
 
 ########## Data Exploration ###############################
@@ -765,6 +913,48 @@ def data_overview(data, labels=None):
         stats.append(d)
 
     return pd.DataFrame(stats)
+
+
+def analyse_prediction(input_text, correct_text, raw_prediction, processed_prediction, labels):
+    def check_current_balance(balance, label_index, labels):
+        start_markers, end_markers = balance[label_index]
+        if end_markers > start_markers:
+            d_str = f'closing marker before opening marker for label ' \
+                        f'{labels[label_index]}/{label_index}: {str(balance[label_index])}'
+            return d_str
+
+    def count_tags(s):
+        start_re = re.compile(r'\[i-(\d+)\]')
+        end_re = re.compile(r'\[o-(\d+)\]')
+        start_or_end = re.compile(r'\[([io])-(\d+)\]')
+        start_tags = start_re.findall(s)
+        #print('start tags', start_tags)
+
+        end_tags = end_re.findall(s)
+        #print('end tags', end_tags)
+
+        all_tags = start_or_end.findall(s)
+
+        balance = {label_index: (0, 0) for label_index in range(len(labels))}
+        errs = []
+        for t in all_tags:
+            i_o = t[0]
+            label_index = int(t[1])
+
+            cur = balance[label_index]
+            if i_o == 'i':
+                balance[label_index] = (cur[0] + 1, cur[1])
+            else:
+                balance[label_index] = (cur[0], cur[1] + 1)
+
+            e_str = check_current_balance(balance, label_index, labels)
+            if e_str is not None:
+                errs.append(e_str)
+
+        return errs
+
+    count_tags_res = count_tags(raw_prediction)
+    return count_tags_res
 
 
 ########## Filters #########################################

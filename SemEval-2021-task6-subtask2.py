@@ -27,6 +27,8 @@ import os
 import requests
 from pprint import pprint
 
+# NOTE: this directory is *not* part of the installation, you'll have to get the
+# Propaganda Techniques Corpus yourself.
 TRAINING_ARTICLES_2020_DIR = '../semeval2020/propaganda_detection/datasets/train-articles'
 
 LABELS_2021 = [
@@ -257,7 +259,7 @@ def get_model(encoder_decoder_type, name_or_path, split_in_sentences=False, args
                      encoder_decoder_name=name_or_path,
                      labels=LABELS_2021,
                      split_in_sentences=split_in_sentences,
-                     use_cuda=False,
+                     use_cuda=True,
                      args=args)
 
 def file_exists_or_geturl_and_save(filename):
@@ -267,14 +269,24 @@ def file_exists_or_geturl_and_save(filename):
         with open(filename, 'w') as f:
             f.write(download)
 
+def generate_pickle_files_with_data():
+    import pickle
+    ground_truths = loadJSON2021('tests/dev_set_task2.txt')
+    print('ground truths', ground_truths[:2])
+    with open('tests/ground_truths_dev_task6_subtask2.pkl', 'wb') as f:
+        pickle.dump(ground_truths, f)
+    predictions = loadJSON2021('tests/task2_prediction_file.txt')
+    print('predictions', predictions[:2])
+    with open('tests/predictions_dev_task6_subtask2.pkl', 'wb') as f:
+        pickle.dump(predictions, f)
+
 
 if __name__ == '__main__':
     WITH_TRAINING_2020 = False
-    WITH_TRAINING_2021 = True
+    WITH_TRAINING_2021 = False
     if WITH_TRAINING_2020:
         args = dict(
             num_train_epochs=30,
-            use_multiprocessing=False,
             overwrite_output_dir=True,
             output_dir='ptc_2020'
         )
@@ -283,8 +295,7 @@ if __name__ == '__main__':
 
     if WITH_TRAINING_2021:
         args = dict(
-            num_train_epochs=1,
-            use_multiprocessing=False,
+            num_train_epochs=30,
             overwrite_output_dir=True,
             output_dir='memes_2021'
         )
@@ -295,7 +306,7 @@ if __name__ == '__main__':
         model = get_model('bart', model_path, args=args)
         train_memes_2021(model, args=args)
 
-    prediction_args = dict(
+    generation_args = dict(
         max_length=200,
         length_penalty=0.4,  # Found best value to be 0.4
         repetition_penalty=2.0,  # Found best value to be 2.0
@@ -305,15 +316,16 @@ if __name__ == '__main__':
         top_k=0,  # Set to 0
         do_sample=True
     )
-    model = get_model('bart', 'memes_2021', split_in_sentences=True, args=prediction_args)
+    model = get_model('bart', 'memes_2021', split_in_sentences=True, args=generation_args)
 
     test_set_task2_filename = 'test_set_task2.txt'
     file_exists_or_geturl_and_save(test_set_task2_filename)
 
     test_data_2021 = loadJSON2021(test_set_task2_filename)
 
-    #print(model.eval_model(test_data_2021))
+    print(model.eval_model(test_data_2021, report='flc', analyse=True))
 
+"""
     sentences = [d['article'] for d in test_data_2021]
     outcome = model.predict(sentences)
 
@@ -334,7 +346,7 @@ if __name__ == '__main__':
     pprint(res)
     with open(predict_file, 'w', encoding='utf8') as f:
         json.dump(res, f, indent=4, ensure_ascii=False)
-
+"""
 
 
 

@@ -7,3 +7,9 @@ start_conda.sh
 training_set_task2.txt
 dev_set_task2.txt
 test_set_task2.txt
+task2_prediction.txt
+/.goodscore.txt.swp
+/goodscore.txt
+/tests/task2_prediction_file.txt
+/tsd_train.csv
+/analyse.py

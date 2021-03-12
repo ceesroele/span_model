@@ -5,7 +5,7 @@ A sequence-to-sequence model for simultaneously identifying a span within a text
 
 ## Installation
 
-```buildoutcfg
+```
 Create a conda environment:
 
 conda create --name "semeval2021-task2"
@@ -19,12 +19,29 @@ conda install python=3.8
 
 Install python packages:
 pip install -r requirements.txt
+```
+
+## Example applications
+
+There are two example applications.
+
+### Detecting Toxic Spans
+
+Task 5 of SemEval-2021.
+
+```
+python SemEval-2021-task5.py
+```
+
+Running this results in an average F1 score of 0.857 on the test set.
 
 
-Run it with:
-python SemEval-2021-task6-subtask2.py
+### Detecting Manipulation Techniques in Text
 
-Outcome will be the generation of a submission file as used in the SemEval task.
+Task 6 subtask 2 of SemEval-2021.
+
+```
+python SemEval-2021-task6-2.py
 ```
 
 ## Future work
